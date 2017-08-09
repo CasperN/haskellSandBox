@@ -70,35 +70,42 @@ findThreshold fp wps = (th, p , err)
   where
     -- We want to maximise by polarity p, and threshold th;
     -- p * correctness = sum (weight | score < th) - sum (weight | score > th)
-    -- Note that: (correctness @ th) + total = -2 {w | s < th}
-    -- where total = sum {weight}
+    -- Since sum weights == 0, if below thresholds is net backgrounds, then
+    -- above threshold is net faces.
     th =  fromIntegral (scores !! idx + scores !! (idx+1)) / 2
-    p = scr < 0 -- mostly backgrounds below threshold
+    p = scr < 0 -- True if net backgrounds below threshold => faces above
     err = 1.0 - abs (2 * scr)
-    -- Scan accross sortedWeighedScores consider threshold in the gaps
-    -- cumsumWeights[i] == .3 means net weight below threshold is 30% faces
-    -- Therefore as sum(Weights) == 0,  60% are correctly classified.
-    (w', scr, idx) = maximumBy csw wsi
+    -- Scan accross cumsumWeights and consider threshold b/w index i,i+1
+    -- cumSumWeights !! i = net faces/backgrounds of scores <= threshold
+    -- between scores !! i and scores !! (i+1).
+    -- Net faces if negative, net backgrounds if postive.
+    (w', scr, idx) = maximumBy compareCSW $ zip3 cumsumWeights scores [0..]
       where
-        csw a b = compare (snd' a) (snd' b)
-        snd' (weight, cumsumWeight, index) = cumsumWeight
-        wsi = zip3 weights cumsumWeights [0..]
+        compareCSW a b = compare (fst' a) (fst' b)
+        fst' (cumSumWeight, score, index) = cumSumWeight
+    -- Cumulative summation over weights to consider threshold <= that score
     cumsumWeights = scanl1 (+) weights
     (weights, scores) = unzip col
-    -- Collapse identical scores and add weights
+    -- Collapse identical scores (adding weights of identical scores)
     col = map combine $ groupBy (\(w1,s1) (w2,s2) -> s1 == s2) sWeighedScores
       where
         combine group = let (w,s) = unzip group in (sum w, head s)
     sWeighedScores = sortOn snd weighedScores
     -- Calculate Weights and Scores
     weighedScores = map weighScores wps
-    weighScores wp = (weigh wp ,calculateFeature fp $ point wp)
-    weigh wp = if label wp then weight wp else - weight wp
+      where
+        weighScores wp = (weigh wp ,calculateFeature fp $ point wp)
+        weigh wp = if label wp then weight wp else - weight wp
+
 
 stump :: FilterParams -> Polarity -> Threshold -> IntegralImage -> Bool
 stump params pol th ii = pol && (fromIntegral score > th)
   where
     score = calculateFeature params ii
 
-findPredictorAndError :: [WeightedPoint a] -> (IntegralImage -> Double,Error)
-findPredictorAndError distribution = undefined
+
+findBestPredictor :: [FilterParams] ->
+                     [WeightedPoint IntegralImage] ->
+                     (IntegralImage -> Bool)
+{- Find the best FilterParams from a list. Embarassingly parallelizable. -}
+findBestPredictor distribution = undefined

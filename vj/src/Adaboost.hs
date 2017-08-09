@@ -6,6 +6,16 @@ module Adaboost where
 import Data.List             (genericLength)
 
 
+predictorError :: (Num n) => [WeightedPoint a] ->
+                            (a -> bool) ->
+                            n
+{- Returns the Error of a predictor-}
+predictorError = undefined
+
+
+
+
+
 data WeightedPoint a = Wpt {weight :: Float,
                             label  :: Bool,
                             point  :: a}
@@ -25,11 +35,14 @@ weighImages faces backgrounds = wfaces ++ wbacks
 
 
 -- Adaboost
-reWeightDistribution :: [WeightedPoint a] -> (a -> Double) -> [WeightedPoint a]
-reWeightDistribution iis stump = undefined
+reWeightDistribution :: [WeightedPoint a] -> (a -> Bool) -> [WeightedPoint a]
+reWeightDistribution wps stump = undefined
 
-trainAdaboostedClassifier :: [WeightedPoint a] -> (a -> Double)
-trainAdaboostedClassifier distribution = undefined
+trainAdaboostedClassifier :: [WeightedPoint a] ->              -- Data
+                             (WeightedPoint a -> a -> Bool) -> -- Classfier trainer
+                             Float ->                          -- FPR threshold
+                             (a -> Bool)                       -- Boosted
+trainAdaboostedClassifier distribution trainer fpr_threshold = undefined
 
 
 -- Cascade of Adaboosted Classifiers
