@@ -21,20 +21,9 @@ import Data.Array.Repa       hiding (map, (++), zipWith, transpose)
 -- App
 import HaarFilter
 import Adaboost
--- import Cumsum
-
-ex = "/Users/Casper/Dropbox/School Stuff/Past classes/CMSC 254/ML hw4/faces/face0.jpg"
-ex2 = "/Users/Casper/Dropbox/School Stuff/Past classes/CMSC 254/ML hw4/faces/class.jpg"
 
 faceDir = "/Users/Casper/Dropbox/School Stuff/Past classes/CMSC 254/ML hw4/faces/"
 backDir = "/Users/Casper/Dropbox/School Stuff/Past classes/CMSC 254/ML hw4/background/"
-
--- Main stuff
-
--- getDirectoryContents is old version which I need for JuicyPixels :/
-listDirectory = getDirectoryContents
-
-
 
 main :: IO ()
 main = do
@@ -71,7 +60,7 @@ readDirToIntegralImages dir = do
 
 getJpgs :: String -> IO [String]
 getJpgs dir = do
-  files <- listDirectory dir
+  files <- getDirectoryContents dir -- in new haskell its listDirectory
   return $ map (dir++) $ filter (\f -> ".jpg" == takeExtension f) files
 
 
@@ -104,14 +93,8 @@ toIntegralImage rArray = fromListUnboxed (Z :. 64 :. 64) ii2
     ii2 = map fromIntegral $ concat ii :: [Int]
     ii = cumsum2D elements2D
     -- Cumulative summation over both axis
-    cumsum2D x = transpose $ cumsum $ transpose $ cumsum x
+    cumsum2D = transpose . cumsum . transpose . cumsum
     cumsum = scanl1 (zipWith (+))
     -- From Repa
     elements2D = [[ x | (idx,x) <- elements, idx`div`64 == row]| row <- [0..63]]
     elements = zip [0,1..] . map toInteger $ toList rArray
-
-
-{-- Haar Filter: a simple feature to be combined dozens of times by Adaboost --}
-
-
-{-------------------- Weigh and Label Images for Adaboost ---------------------}

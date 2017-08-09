@@ -6,7 +6,10 @@ module Adaboost where
 import Data.List             (genericLength)
 
 
-data WeightedPoint a = Wpt {w :: Float, t :: Bool, ii :: a}
+data WeightedPoint a = Wpt {weight :: Float,
+                            label  :: Bool,
+                            point  :: a}
+                          deriving (Show)
 
 
 

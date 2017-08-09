@@ -1,2 +1,4 @@
-./stack-work
-Main
+*.o
+*.hi
+*.pdf
+vj/.stack-work/
