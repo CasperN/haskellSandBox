@@ -31,8 +31,17 @@ main = do
   faces <- readDirToIntegralImages faceDir
   print "Reading backs..."
   backs <- readDirToIntegralImages backDir
-  let wi = weighImages faces backs
-  print "done"
+  let wi = weighAndLabelPoints faces backs
+  let fp = Filter {shape = S2x1, window =  Window 30 15 50 40}
+
+  let (th, pol, err) = findThreshold (calculateFeature fp) wi
+  print $ "findThreshold -> (th,pol,err)"
+  print $ (th,pol,err)
+  let s = stump fp pol th
+  print $ "The error actually is"
+  print $ predictorError wi s
+
+
 
   -- print "reading files"
   -- facefiles <- getJpgs faceDir

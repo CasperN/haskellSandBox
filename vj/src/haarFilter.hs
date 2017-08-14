@@ -5,12 +5,12 @@ module HaarFilter where
 
 import Adaboost              (WeightedPoint, weight, label, point)
 import Data.Array.Repa       hiding (map, (++))
-import Data.List             (sortOn, groupBy, maximumBy)
+import Data.List             (sortOn, groupBy, maximumBy, minimumBy)
 
 type IntegralImage = Array U DIM2 Int
 
 
-data FilterShape  = S1x1 |  S1x2 | S2x1 | S2x2 | S3x1 | S1x3 deriving (Show, Eq)
+data FilterShape  = S1x1 | S1x2 | S2x1 | S2x2 | S3x1 | S1x3 deriving (Show, Eq)
 data FilterWindow = Window Int Int Int Int deriving (Show)
 data FilterParams = Filter {shape :: FilterShape, window :: FilterWindow}
   deriving (Show)
@@ -59,43 +59,55 @@ type Polarity = Bool
 type Threshold = Float
 type Error = Float
 
-findThreshold :: FilterParams ->
-                 [WeightedPoint IntegralImage] ->
-                 (Threshold, Polarity, Error)
-{- Find the threshold and polarity that minimises error.
- - Threshold, Polarity and FilterParams together defines a Haar classifier which
- - works as follows: if polarity and (calculateFeature fp ii) > threshold
- - then classify ii as a face else as a background. -}
-findThreshold fp wps = (th, p , err)
+findThreshold :: (a -> Int) ->         -- calculate feature value
+                  [WeightedPoint a] ->  -- Weighted points
+                  (Threshold, Polarity, Error)
+{- Find the minimum 1/0 error by choice of Threshold and Polarity.
+ - This allows a numeric feature score to become a simple binary classifier.
+ - If (score > threshold) == (polarity == True) then classify as True ie group
+ - A, Face, etc. Otherwise classify as False, group B, Background, etc. -}
+findThreshold scoreFeature wpts = (thr, pol, err)
   where
-    -- We want to maximise by polarity p, and threshold th;
-    -- p * correctness = sum (weight | score < th) - sum (weight | score > th)
-    -- Since sum weights == 0, if below thresholds is net backgrounds, then
-    -- above threshold is net faces.
-    th =  fromIntegral (scores !! idx + scores !! (idx+1)) / 2
-    p = scr < 0 -- True if net backgrounds below threshold => faces above
-    err = 1.0 - abs (2 * scr)
-    -- Scan accross cumsumWeights and consider threshold b/w index i,i+1
-    -- cumSumWeights !! i = net faces/backgrounds of scores <= threshold
-    -- between scores !! i and scores !! (i+1).
-    -- Net faces if negative, net backgrounds if postive.
-    (w', scr, idx) = maximumBy compareCSW $ zip3 cumsumWeights scores [0..]
+    n = length wpts
+    -- scoreGroups :: [(score,[(weight, label)])]
+    scoreGroups = map fixGroup $ groupBy (\a b -> fst a == fst b) sortedScores
       where
-        compareCSW a b = compare (fst' a) (fst' b)
-        fst' (cumSumWeight, score, index) = cumSumWeight
-    -- Cumulative summation over weights to consider threshold <= that score
-    cumsumWeights = scanl1 (+) weights
-    (weights, scores) = unzip col
-    -- Collapse identical scores (adding weights of identical scores)
-    col = map combine $ groupBy (\(w1,s1) (w2,s2) -> s1 == s2) sWeighedScores
+        fixGroup sgrp = let (s, wl) = unzip sgrp in (head s, wl)
+        sortedScores = sortOn fst $ map scorePoint wpts
+        scorePoint wpt = (fromIntegral $ scoreFeature $ point wpt,
+                          (weight wpt, label wpt))
+    -- let Threshold be between scores in
+    -- accA = sum(weight | score < Threshold, label = True)
+    -- accB = sum(weight | score < Threshold, label = False)
+    nextThreshold (accA, accB) (score, weightAndLabel) = (accA', accB')
       where
-        combine group = let (w,s) = unzip group in (sum w, head s)
-    sWeighedScores = sortOn snd weighedScores
-    -- Calculate Weights and Scores
-    weighedScores = map weighScores wps
+        accA' = accA + (sum $ map fst $ filter snd weightAndLabel)
+        accB' = accB + (sum $ map fst $ filter (not.snd) weightAndLabel)
+    acc = scanl nextThreshold (0,0) scoreGroups
+    (totA, totB) = last acc
+    -- To calculate Error from accA/accB if Polarity = T/F, note that:
+    -- error(th,pol=T) = sum(w |s<th, l=T) + sum(w | s>th, l=F)
+    --                 = sum(w |s<th, l=T) + sum(w|l = F) - sum (w | s<th, l=F)
+    --                 = accA + totB - accB
+    -- Fold to find the minimum Threshold index, error and polarity
+    (err, i, pol) = foldl bestErr minThErr $ zip acc [0..]
       where
-        weighScores wp = (weigh wp ,calculateFeature fp $ point wp)
-        weigh wp = if label wp then weight wp else - weight wp
+        bestErr (min_error, min_i, p) ((accA,accB), i)
+          | e == min_error = (min_error, min_i, p)
+          | e == errA      = (errA, i, True)
+          | e == errB      = (errB, i, False)
+          where
+            errA = accA + totB - accB
+            errB = accB + totA - accA
+            e = minimum [min_error, errA, errB]
+        -- case where best threshold < min scores
+        minThErr = if totA > totB then (totA, -1, True) else (totB, -1, False)
+    -- get minimum threshold from minimum threshold index
+    thr | i == -1     = head scores' - 1 -- before minimum score
+        | i == n - 1  = last scores' + 1 -- after maximum score
+        | otherwise   = (scores' !! i + scores' !! (i-1)) / 2
+      where scores' = map fst scoreGroups
+
 
 
 stump :: FilterParams -> Polarity -> Threshold -> IntegralImage -> Bool
