@@ -1,15 +1,14 @@
-{- Short summary
+{- This program builds a face detector replicating the Viola Jones paper.
 
-Long description
+It classifies 64*64 pixel grey images as faces or backgrounds using a cascade of
+adaboosted Haar Filters. Its super fast! (but not to train)
 
-stuck due to package reasons
-dependances suck with friday and repa devil
-
+TODO FLAGS: faceDir, backDir, nFeatures, saveClassifier, testImage
 -}
 {-# LANGUAGE FlexibleContexts #-}
 
 module Main where
-
+-- Import from universe
 import Prelude               hiding (traverse)
 import Control.Monad         (mapM)
 import Data.List             (transpose)
@@ -18,7 +17,7 @@ import System.FilePath       (takeExtension)
 import Data.Word             (Word8)
 import Codec.Picture.Repa    (imgData,readImage, RGB, Img)
 import Data.Array.Repa       hiding (map, (++), zipWith, transpose)
--- App
+-- Import from App
 import HaarFilter
 import Adaboost
 
@@ -41,8 +40,6 @@ main = do
   print $ "The error actually is"
   print $ predictorError wi s
 
-
-
   -- print "reading files"
   -- facefiles <- getJpgs faceDir
   -- faces <- mapM readImageToArray facefiles
@@ -51,12 +48,6 @@ main = do
   -- print "faces greyed"
   -- let a = head greyFaces
   -- let b = toIntegralImage a
-
-  -- TO DO: Cumulative sum
-  -- do
-  --   x <- computeUnboxedP $ head greyFaces
-  --   print x
-
 
 -- IO
 
@@ -95,7 +86,8 @@ greyImage img = traverse img collapse luminosity
 
 toIntegralImage :: (Source r Word8) => Array r DIM2 Word8 -> IntegralImage
 {- Use IntegralImage to have O(1) calculation of HaarFeatures. This function is
-   using an inefficient list based method because there is no repa scan :(    -}
+   using an inefficient list based method because there is no repa scan :(
+-}
 toIntegralImage rArray = fromListUnboxed (Z :. 64 :. 64) ii2
   where
     -- To Repa

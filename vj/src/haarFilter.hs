@@ -1,15 +1,15 @@
-{- Short Desc
-   Long Desc
+{- Simple classifier of 64*64 sized grey images
 -}
 module HaarFilter where
 
 import Adaboost              (WeightedPoint, weight, label, point)
 import Data.Array.Repa       hiding (map, (++))
-import Data.List             (sortOn, groupBy, maximumBy, minimumBy)
+import Data.List             (sortOn, sortBy, groupBy, foldl',foldl1')
+import Data.Ord              (comparing)
+import System.Random         (mkStdGen, randoms)
+
 
 type IntegralImage = Array U DIM2 Int
-
-
 data FilterShape  = S1x1 | S1x2 | S2x1 | S2x2 | S3x1 | S1x3 deriving (Show, Eq)
 data FilterWindow = Window Int Int Int Int deriving (Show)
 data FilterParams = Filter {shape :: FilterShape, window :: FilterWindow}
@@ -18,9 +18,14 @@ data FilterParams = Filter {shape :: FilterShape, window :: FilterWindow}
 
 {-# ANN calculateFeature "HLint: ignore Redundant bracket" #-}
 calculateFeature :: FilterParams -> IntegralImage -> Int
-{- Image subtracts different sections of a detector window (Haar Feature) -}
+{- Image subtracts different sections of a detector window (Haar Feature)
+ -}
 calculateFeature (Filter {shape = sh , window = Window i0 j0 i1 j1}) ii =
-  case sh of
+  let
+    -- Darkness of rectangle defined by BL, TR corners; (i0,j0); (i1,j1)
+    idx a b = ii ! (Z :. a :. b)
+    rect i0 j0 i1 j1 = idx i0 j0 + idx i1 j1 - idx i0 j1 - idx i1 j0
+  in case sh of
     -- Whole window
     S1x1 -> (rect i0 j0 i1 j1)
     -- Right - Left
@@ -49,23 +54,22 @@ calculateFeature (Filter {shape = sh , window = Window i0 j0 i1 j1}) ii =
         deltaJ = (j1 - j0) `div` 3
         j'  = j0 + deltaJ
         j'' = j0 + deltaJ + deltaJ
-  where
-    -- Darkness of rectangle with BL, TR corners; (i0,j0); (i1,j1) respectively
-    rect i0 j0 i1 j1 = idx i0 j0 + idx i1 j1 - idx i0 j1 - idx i1 j0
-    idx a b = ii ! (Z :. a :. b)
+
 
 -- Find Threshold given weights and labels to minimize 1/0 error of Haar Filter
 type Polarity = Bool
 type Threshold = Float
 type Error = Float
 
+
 findThreshold :: (a -> Int) ->         -- calculate feature value
-                  [WeightedPoint a] ->  -- Weighted points
-                  (Threshold, Polarity, Error)
+                 [WeightedPoint a] ->  -- Weighted points
+                 (Threshold, Polarity, Error)
 {- Find the minimum 1/0 error by choice of Threshold and Polarity.
  - This allows a numeric feature score to become a simple binary classifier.
  - If (score > threshold) == (polarity == True) then classify as True ie group
- - A, Face, etc. Otherwise classify as False, group B, Background, etc. -}
+ - A, Face, etc. Otherwise classify as False, group B, Background, etc.
+ -}
 findThreshold scoreFeature wpts = (thr, pol, err)
   where
     n = length wpts
@@ -76,7 +80,6 @@ findThreshold scoreFeature wpts = (thr, pol, err)
         sortedScores = sortOn fst $ map scorePoint wpts
         scorePoint wpt = (fromIntegral $ scoreFeature $ point wpt,
                           (weight wpt, label wpt))
-    -- let Threshold be between scores in
     -- accA = sum(weight | score < Threshold, label = True)
     -- accB = sum(weight | score < Threshold, label = False)
     nextThreshold (accA, accB) (score, weightAndLabel) = (accA', accB')
@@ -87,11 +90,14 @@ findThreshold scoreFeature wpts = (thr, pol, err)
     (totA, totB) = last acc
     -- To calculate Error from accA/accB if Polarity = T/F, note that:
     -- error(th,pol=T) = sum(w |s<th, l=T) + sum(w | s>th, l=F)
-    --                 = sum(w |s<th, l=T) + sum(w|l = F) - sum (w | s<th, l=F)
+    --                 = sum(w |s<th, l=T) + sum(w | l=F) - sum(w | s<th, l=F)
     --                 = accA + totB - accB
     -- Fold to find the minimum Threshold index, error and polarity
-    (err, i, pol) = foldl bestErr minThErr $ zip acc [0..]
+    (err, i, pol) = foldl' bestErr minThErr $ zip acc [0..]
       where
+        -- Case where best threshold < min scores
+        minThErr = if totA > totB then (totA, -1, True) else (totB, -1, False)
+        -- Consider Error / Polarity b/w each unique scores
         bestErr (min_error, min_i, p) ((accA,accB), i)
           | e == min_error = (min_error, min_i, p)
           | e == errA      = (errA, i, True)
@@ -100,24 +106,47 @@ findThreshold scoreFeature wpts = (thr, pol, err)
             errA = accA + totB - accB
             errB = accB + totA - accA
             e = minimum [min_error, errA, errB]
-        -- case where best threshold < min scores
-        minThErr = if totA > totB then (totA, -1, True) else (totB, -1, False)
     -- get minimum threshold from minimum threshold index
     thr | i == -1     = head scores' - 1 -- before minimum score
         | i == n - 1  = last scores' + 1 -- after maximum score
-        | otherwise   = (scores' !! i + scores' !! (i-1)) / 2
+        | otherwise   = (scores' !! i + scores' !! (i+1)) / 2
       where scores' = map fst scoreGroups
 
 
-
 stump :: FilterParams -> Polarity -> Threshold -> IntegralImage -> Bool
+{- Decision stump. Turns an integral feature into a binary classifier -}
 stump params pol th ii = pol && (fromIntegral score > th)
   where
     score = calculateFeature params ii
 
 
+getRandomfilterParams :: Int -> Int -> [FilterParams]
+{- Given a random seed, and n, generate n random FilterParams
+ - A Filter param is a filter shape and two points defining a window
+ -}
+getRandomfilterParams seed n = take n $ allFP `sortWith` randomOrder
+  where
+    sortWith a b = map fst $ sortBy (comparing snd) $ zip a b
+    randomOrder = randoms $ mkStdGen seed :: [Int]
+    minWindowSize = 8
+    allFP = [ Filter sh (Window i0 j0 i1 j1) |
+              sh <- [S1x1,S2x1,S1x2,S1x3,S3x1],
+              i0 <- [0,2..62],
+              j0 <- [0,2..62],
+              i1 <- [i0 + minWindowSize, i0 + minWindowSize + 2 .. 63],
+              j1 <- [j0 + minWindowSize, j0 + minWindowSize + 2 .. 63]]
+
+
 findBestPredictor :: [FilterParams] ->
                      [WeightedPoint IntegralImage] ->
                      (IntegralImage -> Bool)
-{- Find the best FilterParams from a list. Embarassingly parallelizable. -}
-findBestPredictor distribution = undefined
+{- Find the best FilterParams from a list... by trying all of them and taking
+ - the best. Its embarassingly parallelizable.
+ -}
+findBestPredictor filterParams distribution = undefined -- foldl1' bestPred scorers
+  where
+    scorers = map calculateFeature filterParams
+    bestPred (bestStump, bestErr) scorer = (bestStump', bestErr')
+      where
+        (th, p, er) = findThreshold scorer distribution
+        (bestStump', bestErr) = if er < bestErr then (stump )
