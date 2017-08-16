@@ -31,14 +31,19 @@ main = do
   print "Reading backs..."
   backs <- readDirToIntegralImages backDir
   let wi = weighAndLabelPoints faces backs
-  let fp = Filter {shape = S2x1, window =  Window 30 15 50 40}
-
-  let (th, pol, err) = findThreshold (calculateFeature fp) wi
-  print $ "findThreshold -> (th,pol,err)"
-  print $ (th,pol,err)
-  let s = stump fp pol th
-  print $ "The error actually is"
+  let fps = getRandomFilterParams 5 50
+  let s = findBestPredictor fps wi
   print $ predictorError wi s
+
+  --
+  -- let fp = Filter {shape = S2x1, window =  Window 30 15 50 40}
+  --
+  -- let (th, pol, err) = findThreshold  wi (calculateFeature fp)
+  -- print $ "findThreshold -> (th,pol,err)"
+  -- print $ (th,pol,err)
+  -- let s = stump fp pol th
+  -- print $ "The error actually is"
+  -- print $ predictorError wi s
 
   -- print "reading files"
   -- facefiles <- getJpgs faceDir
@@ -86,8 +91,8 @@ greyImage img = traverse img collapse luminosity
 
 toIntegralImage :: (Source r Word8) => Array r DIM2 Word8 -> IntegralImage
 {- Use IntegralImage to have O(1) calculation of HaarFeatures. This function is
-   using an inefficient list based method because there is no repa scan :(
--}
+ - using an inefficient list based method because there is no repa scan :(
+ -}
 toIntegralImage rArray = fromListUnboxed (Z :. 64 :. 64) ii2
   where
     -- To Repa
