@@ -3,7 +3,6 @@
 It classifies 64*64 pixel grey images as faces or backgrounds using a cascade of
 adaboosted Haar Filters. Its super fast! (but not to train)
 
-TODO FLAGS: faceDir, backDir, nFeatures, saveClassifier, testImage
 -}
 {-# LANGUAGE FlexibleContexts #-}
 
@@ -26,49 +25,32 @@ backDir = "/Users/Casper/Dropbox/School Stuff/Past classes/CMSC 254/ML hw4/backg
 
 main :: IO ()
 main = do
-  print "Reading faces..."
   faces <- readDirToIntegralImages faceDir
-  print "Reading backs..."
   backs <- readDirToIntegralImages backDir
   let wi = weighAndLabelPoints faces backs
-  let fps = getRandomFilterParams 5 50
-  let s = findBestPredictor fps wi
-  print $ predictorError wi s
+  let (pos,neg) = splitOnLabel wi
 
-  --
-  -- let fp = Filter {shape = S2x1, window =  Window 30 15 50 40}
-  --
-  -- let (th, pol, err) = findThreshold  wi (calculateFeature fp)
-  -- print $ "findThreshold -> (th,pol,err)"
-  -- print $ (th,pol,err)
-  -- let s = stump fp pol th
-  -- print $ "The error actually is"
-  -- print $ predictorError wi s
+  let fps = getRandomFilterParams 10 1000
+  let learner = findBestPredictor fps
+  let c = trainCascade wi [0.4,0.3,0.2] learner
+  let cascadeClassifer = classifyWithCascade c
+  print $ "Final error: " ++ show(predictorError wi cascadeClassifer)
 
-  -- print "reading files"
-  -- facefiles <- getJpgs faceDir
-  -- faces <- mapM readImageToArray facefiles
-  -- print "files read"
-  -- let greyFaces = map greyImage faces
-  -- print "faces greyed"
-  -- let a = head greyFaces
-  -- let b = toIntegralImage a
-
--- IO
 
 readDirToIntegralImages :: String -> IO [IntegralImage]
 readDirToIntegralImages dir = do
+  print $ "reading: "++dir
   files <- getJpgs dir
   imgs <- mapM readImageToArray files
   return $ map (toIntegralImage . greyImage) imgs
 
-
+{-# INLINE getJpgs #-}
 getJpgs :: String -> IO [String]
 getJpgs dir = do
   files <- getDirectoryContents dir -- in new haskell its listDirectory
   return $ map (dir++) $ filter (\f -> ".jpg" == takeExtension f) files
 
-
+{-# INLINE readImageToArray #-}
 readImageToArray :: String -> IO (Array D DIM3 Word8)
 readImageToArray file = do
   e <- readImage file :: IO (Either String (Img RGB))
@@ -88,7 +70,7 @@ greyImage img = traverse img collapse luminosity
         g = fromIntegral $ f (Z :. i :. j :. 1)
         b = fromIntegral $ f (Z :. i :. j :. 2)
 
-
+{-# INLINE toIntegralImage #-}
 toIntegralImage :: (Source r Word8) => Array r DIM2 Word8 -> IntegralImage
 {- Use IntegralImage to have O(1) calculation of HaarFeatures. This function is
  - using an inefficient list based method because there is no repa scan :(

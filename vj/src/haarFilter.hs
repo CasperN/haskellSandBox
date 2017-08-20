@@ -19,8 +19,7 @@ data FilterParams = Filter {shape :: FilterShape, window :: FilterWindow}
 
 {-# ANN calculateFeature "HLint: ignore Redundant bracket" #-}
 calculateFeature :: FilterParams -> IntegralImage -> Int
-{- Image subtracts different sections of a detector window (Haar Feature)
- -}
+{- Image subtracts different sections of a detector window (Haar Feature) -}
 calculateFeature (Filter {shape = sh , window = Window i0 j0 i1 j1}) ii =
   let
     -- Darkness of rectangle defined by BL, TR corners; (i0,j0); (i1,j1)
@@ -64,18 +63,18 @@ type Error = Float
 findThreshold :: [WeightedPoint a]    -- Weighted points
               -> (a -> Int)           -- calculate feature value
               -> (Threshold, Polarity, Error)
-{- Find the minimum 1/0 error of a HaarFilter by choosing Threshold & Polarity.
+{-
+ - Find the minimum 1/0 error of a HaarFilter by choosing Threshold & Polarity.
  - This allows a numeric feature score to become a simple binary classifier.
  - If (score > threshold) == (polarity == True) then classify as True ie group
  - A, Face, etc. Otherwise classify as False, group B, Background, etc.
  -}
-findThreshold wpts scoreFeature = (thr, pol, err)
+findThreshold wpts scoreFeature = {-traceShowId-} (thr, pol, err)
   where
-    n = length wpts
-    -- scoreGroups :: [(score,[(weight, label)])]
-    scoreGroups = map fixGroup $ groupBy (\a b -> fst a == fst b) sortedScores
+    -- Group data by feature scores. scoreGroups :: [(score,[(weight, label)])]
+    scoreGroups = map (\g -> let (s,wl) = unzip g in (head s, wl)) groupedScores
       where
-        fixGroup sgrp = let (s, wl) = unzip sgrp in (head s, wl)
+        groupedScores = groupBy (\a b -> fst a == fst b) sortedScores
         sortedScores = sortOn fst $ map scorePoint wpts
         scorePoint wpt = (fromIntegral $ scoreFeature $ point wpt,
                           (weight wpt, label wpt))
@@ -88,28 +87,22 @@ findThreshold wpts scoreFeature = (thr, pol, err)
     acc = scanl nextThreshold (0,0) scoreGroups
     (totA, totB) = last acc
     -- To calculate Error from accA/accB if Polarity = T/F, note that:
-    -- error(th,pol=T) = sum(w |s<th, l=T) + sum(w | s>th, l=F)
-    --                 = sum(w |s<th, l=T) + sum(w | l=F) - sum(w | s<th, l=F)
+    -- error(th,pol=T) = sum(w | s<th, l=T) + sum(w | s>th, l=F)
+    --                 = sum(w | s<th, l=T) + sum(w | l=F) - sum(w | s<th, l=F)
     --                 = accA + totB - accB
-    -- Fold to find the minimum Threshold index, error and polarity
-    (err, i, pol) = foldl' bestErr minThErr $ zip acc [0..]
+    errors = map (\(a,b) -> (a + totB - b, b + totA - a)) acc
+    -- Pick best polarity at each level (and add the index too)
+    toEIP ((ea,eb),i) = if ea < eb then (ea, i, True) else (eb, i, False)
+    errorIndexPol = map toEIP $ zip errors [-1..]
+    -- Take minimum error
+    (err,i,pol) = minimumBy (comparing (\(e,_,_) -> e)) errorIndexPol
+    -- Get threshold from index of minimum error
+    thr | i == -1    = head scores' - 1 -- before minimum score
+        | i == n - 1 = last scores' + 1 -- after maximum score
+        | otherwise  = (scores' !! (i) + scores' !! (i+1)) / 2
       where
-        -- Case where best threshold < min scores
-        minThErr = if totA > totB then (totA, -1, True) else (totB, -1, False)
-        -- Consider Error / Polarity b/w each unique scores
-        bestErr (min_error, min_i, p) ((accA,accB), i)
-          | e == min_error = (min_error, min_i, p)
-          | e == errA      = (errA, i, True)
-          | e == errB      = (errB, i, False)
-          where
-            errA = accA + totB - accB
-            errB = accB + totA - accA
-            e = minimum [min_error, errA, errB]
-    -- get minimum threshold from minimum threshold index
-    thr | i == -1     = head scores' - 1 -- before minimum score
-        | i == n - 1  = last scores' + 1 -- after maximum score
-        | otherwise   = (scores' !! i + scores' !! (i+1)) / 2
-      where scores' = map fst scoreGroups
+        scores' = map fst scoreGroups
+        n = length scoreGroups
 
 
 stump :: FilterParams -> Polarity -> Threshold -> IntegralImage -> Bool
@@ -121,8 +114,7 @@ stump params pol th ii = pol && (fromIntegral score > th)
 
 getRandomFilterParams :: Int -> Int -> [FilterParams]
 {- Given a random seed, and n, generate n random FilterParams
- - A Filter param is a filter shape and two points defining a window
- -}
+ - A Filter param is a filter shape and two points defining a window -}
 getRandomFilterParams seed n = take n $ allFP `sortWith` randomOrder
   where
     sortWith a b = map fst $ sortBy (comparing snd) $ zip a b
@@ -139,12 +131,13 @@ getRandomFilterParams seed n = take n $ allFP `sortWith` randomOrder
 findBestPredictor :: [FilterParams]                -- Potential filters
                   -> [WeightedPoint IntegralImage] -- Data
                   -> (IntegralImage -> Bool)       -- Best classfier & error
-{- Find the best FilterParams from a list... by trying all of them and taking
+{-
+ - Find the best FilterParams from a list... by trying all of them and taking
  - the best. In particular the "map" is embarassingly parallelizable.
  -}
-findBestPredictor filterParams distribution = if e < 0.5 then bestPred else undefined
+findBestPredictor filterParams distribution = bp
   where
-    e = traceShowId bestErr
+    bp = trace ("\tbestErr: " ++ show bestErr) bestPred
     (bestPred, bestErr) = minimumBy (comparing snd) $ map toStumpErr filterParams
     toStumpErr fp = (s, predictorError distribution s)
       where
